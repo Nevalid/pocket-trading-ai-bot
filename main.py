@@ -19,6 +19,30 @@ ADMIN_IDS = [6941597273]
 REF_LINK = "https://pocketoption.com/register?utm_source=ref"
 SUPPORT_LINK = "https://t.me/your_support"
 
+# Пресеты стратегий
+PRESETS = {
+    "precision": {
+        "title": "🎯 Precision Strike",
+        "desc": "Максимальная агрессия, короткая экспирация",
+        "stop": 3, "cycles": 5, "tf": "1 мин", "delay": 1.2
+    },
+    "high_profit": {
+        "title": "⚡️ High-Profit",
+        "desc": "Расширенная лестница, ставка на серию",
+        "stop": 5, "cycles": 10, "tf": "5 мин", "delay": 2.5
+    },
+    "balanced": {
+        "title": "📊 Balanced",
+        "desc": "Баланс риска и частоты входов",
+        "stop": 4, "cycles": 10, "tf": "5 мин", "delay": 2.0
+    },
+    "conservative": {
+        "title": "🛡 Conservative",
+        "desc": "Минимальная просадка, для малых депозитов",
+        "stop": 3, "cycles": 10, "tf": "1 мин", "delay": 1.8
+    }
+}
+
 class AuthState(StatesGroup):
     waiting_for_reg_uid = State()
     waiting_for_email = State()
@@ -46,6 +70,7 @@ def get_start_keyboard():
 def get_main_menu_keyboard(is_admin: bool = False):
     kb = [
         [InlineKeyboardButton(text="🚀 Начать торговлю", callback_data="select_account_type")],
+        [InlineKeyboardButton(text="📊 Стратегии торговли", callback_data="strategies")],
         [InlineKeyboardButton(text="💰 Пополнить", callback_data="deposit")],
         [InlineKeyboardButton(text="🎯 Настройки", callback_data="settings")],
         [
@@ -58,6 +83,30 @@ def get_main_menu_keyboard(is_admin: bool = False):
         
     kb.append([InlineKeyboardButton(text="📕 Выйти из аккаунта РО", callback_data="logout")])
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_strategies_keyboard(active_preset="high_profit", custom_mode=False):
+    kb = []
+    for key, p in PRESETS.items():
+        is_active = (key == active_preset and not custom_mode)
+        status = "🔴 АКТИВЕН" if is_active else "⚪️ Выбрать"
+        kb.append([InlineKeyboardButton(text=f"{p['title']} [{status}]", callback_data=f"set_preset_{key}")])
+
+    custom_status = "🟢 ВКЛ" if custom_mode else "⚪️ ВЫКЛ"
+    kb.append([InlineKeyboardButton(text=f"⚙️ Ручные настройки [{custom_status}]", callback_data="custom_settings")])
+    kb.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+def get_custom_settings_keyboard(stop=5, cycles=10, tf="5 мин"):
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=f"Стоп: {stop} мин", callback_data="set_custom_stop"),
+                InlineKeyboardButton(text=f"Циклы: {cycles}", callback_data="set_custom_cycles"),
+                InlineKeyboardButton(text=f"ТФ: {tf}", callback_data="set_custom_tf")
+            ],
+            [InlineKeyboardButton(text="⬅️ К стратегиям", callback_data="strategies")]
+        ]
+    )
 
 def get_settings_keyboard(lang="🇷🇺 Русский", martin="Вкл (до 3 плечей)", tf="1 мин"):
     return InlineKeyboardMarkup(
@@ -191,7 +240,7 @@ async def process_create_acc(callback: types.CallbackQuery, state: FSMContext):
 async def process_reg_uid(message: types.Message, state: FSMContext):
     uid = message.text.strip()
     email = f"user_{uid}@pocket.option"
-    await state.update_data(email=email, uid=uid, real_bal=0.0, demo_bal=54920.0, lang="🇷🇺 Русский", martin="Вкл (до 3 плечей)", tf="1 мин")
+    await state.update_data(email=email, uid=uid, real_bal=0.0, demo_bal=54920.0, lang="🇷🇺 Русский", martin="Вкл (до 3 плечей)", tf="1 мин", active_preset="high_profit", custom_mode=False, custom_stop=5, custom_cycles=10, custom_tf="5 мин")
     await message.answer("✅ Аккаунт успешно привязан!")
     data = await state.get_data()
     await show_main_menu(message, data, message.from_user.id)
@@ -219,11 +268,82 @@ async def process_password(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     email = user_data.get("email", f"user_{generated_uid}@pocket.option")
 
-    await state.update_data(email=email, uid=generated_uid, real_bal=0.0, demo_bal=54920.0, lang="🇷🇺 Русский", martin="Вкл (до 3 плечей)", tf="1 мин")
+    await state.update_data(email=email, uid=generated_uid, real_bal=0.0, demo_bal=54920.0, lang="🇷🇺 Русский", martin="Вкл (до 3 плечей)", tf="1 мин", active_preset="high_profit", custom_mode=False, custom_stop=5, custom_cycles=10, custom_tf="5 мин")
     await message.answer("🎮 Демо-режим открывается после первого пополнения реального счёта.\n\n💳 Пополни реальный счёт — и демо станет доступно.", parse_mode="Markdown")
     await asyncio.sleep(2)
     updated_data = await state.get_data()
     await show_main_menu(message, updated_data, message.from_user.id)
+
+# --- ЛОГИКА СТРАТЕГИЙ И ПРЕСЕТОВ ---
+
+@dp.callback_query(F.data == "strategies")
+async def process_strategies(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    data = await state.get_data()
+    active_preset = data.get("active_preset", "high_profit")
+    custom_mode = data.get("custom_mode", False)
+
+    if custom_mode:
+        stop = data.get("custom_stop", 5)
+        cycles = data.get("custom_cycles", 10)
+        tf = data.get("custom_tf", "5 мин")
+        status_text = f"⚙️ **Ручной режим**\nСтоп: {stop} минусов | Циклов: {cycles} | Экспирация: {tf}"
+    else:
+        p = PRESETS.get(active_preset, PRESETS["high_profit"])
+        status_text = f"**{p['title']}**\n_{p['desc']}_\nСтоп: {p['stop']} минусов | Циклов: {p['cycles']} | Экспирация: {p['tf']}"
+
+    text = f"📊 **Настройки и стратегии торговли**\n\nCurrent Config:\n{status_text}\n\nВыберите пресет или настройте вручную:"
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=get_strategies_keyboard(active_preset, custom_mode))
+
+@dp.callback_query(F.data.startswith("set_preset_"))
+async def process_set_preset(callback: types.CallbackQuery, state: FSMContext):
+    preset_key = callback.data.replace("set_preset_", "")
+    await state.update_data(active_preset=preset_key, custom_mode=False)
+    p = PRESETS.get(preset_key, PRESETS["high_profit"])
+    await callback.answer(f"Активирована стратегия: {p['title']}")
+    await process_strategies(callback, state)
+
+@dp.callback_query(F.data == "custom_settings")
+async def process_custom_settings(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.update_data(custom_mode=True)
+    data = await state.get_data()
+    stop = data.get("custom_stop", 5)
+    cycles = data.get("custom_cycles", 10)
+    tf = data.get("custom_tf", "5 мин")
+
+    text = "⚙️ **Ручные настройки параметров**\n\nНастройте параметры индивидуально:"
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=get_custom_settings_keyboard(stop, cycles, tf))
+
+@dp.callback_query(F.data == "set_custom_stop")
+async def toggle_custom_stop(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    stops = [3, 4, 5]
+    curr = data.get("custom_stop", 5)
+    next_s = stops[(stops.index(curr) + 1) % len(stops)] if curr in stops else 3
+    await state.update_data(custom_stop=next_s)
+    await callback.answer(f"Стоп: {next_s} минусов")
+    await process_custom_settings(callback, state)
+
+@dp.callback_query(F.data == "set_custom_cycles")
+async def toggle_custom_cycles(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    cycles_list = [5, 10, 15]
+    curr = data.get("custom_cycles", 10)
+    next_c = cycles_list[(cycles_list.index(curr) + 1) % len(cycles_list)] if curr in cycles_list else 5
+    await state.update_data(custom_cycles=next_c)
+    await callback.answer(f"Макс. циклов: {next_c}")
+    await process_custom_settings(callback, state)
+
+@dp.callback_query(F.data == "set_custom_tf")
+async def toggle_custom_tf(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    tfs = ["1 мин", "5 мин", "15 мин"]
+    curr = data.get("custom_tf", "5 мин")
+    next_tf = tfs[(tfs.index(curr) + 1) % len(tfs)] if curr in tfs else "1 мин"
+    await state.update_data(custom_tf=next_tf)
+    await callback.answer(f"Экспирация: {next_tf}")
+    await process_custom_settings(callback, state)
 
 # --- ЛОГИКА ТОРГОВОЙ СЕССИИ (ВОРОНКА) ---
 
@@ -243,7 +363,6 @@ async def process_account_choice(callback: types.CallbackQuery, state: FSMContex
     real_bal = data.get("real_bal", 0.0)
     is_admin = callback.from_user.id in ADMIN_IDS
 
-    # Проверка условий запуска для Реального счёта
     if acc_type == "real" and not is_admin and real_bal < 250:
         text = (
             "⚠️ **Недостаточно средств для запуска**\n\n"
@@ -283,7 +402,6 @@ async def process_custom_amount_input(message: types.Message, state: FSMContext)
     await state.update_data(trade_amount=f"${amount_text}")
     msg = await message.answer("⚙️ Инициализация торговой сессии...")
     
-    # Имитация CallbackQuery объекта для запуска сессии
     class FakeCallback:
         def __init__(self, message, user):
             self.message = message
@@ -299,6 +417,17 @@ async def start_trading_session(callback, state: FSMContext):
     amount = data.get("trade_amount", "$50")
     acc_type = data.get("selected_acc_type", "demo")
     
+    # Считываем активные параметры стратегии
+    custom_mode = data.get("custom_mode", False)
+    if custom_mode:
+        cycles_count = data.get("custom_cycles", 5)
+        delay_time = 1.8
+    else:
+        active_preset = data.get("active_preset", "high_profit")
+        preset_info = PRESETS.get(active_preset, PRESETS["high_profit"])
+        cycles_count = preset_info["cycles"]
+        delay_time = preset_info["delay"]
+
     bal_key = "real_bal" if acc_type == "real" else "demo_bal"
     current_bal = data.get(bal_key, 54920.0)
 
@@ -310,13 +439,13 @@ async def start_trading_session(callback, state: FSMContext):
         [InlineKeyboardButton(text="⏸ Остановить и посмотреть результат", callback_data="stop_session")]
     ])
 
-    for i in range(1, 6):
+    for i in range(1, cycles_count + 1):
         current_state = await state.get_state()
         if current_state != TradeState.trading_active.state:
             break
 
         pair = random.choice(pairs)
-        is_win = random.choices([True, False], weights=[70, 30])[0]
+        is_win = random.choices([True, False], weights=[75, 25])[0]
         
         try:
             stake = float(amount.replace("$", "").replace("%", ""))
@@ -349,7 +478,7 @@ async def start_trading_session(callback, state: FSMContext):
         except Exception:
             pass
 
-        await asyncio.sleep(2.5)
+        await asyncio.sleep(delay_time)
 
     await finish_trading_session(callback, state, session_profit, current_bal)
 
