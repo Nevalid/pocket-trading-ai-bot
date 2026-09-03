@@ -10,17 +10,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# Токен бота
-BOT_TOKEN = "8905419939:AAH4AhrCIvA6s8TOdeY0CU48etE7lUKjTv0"  # <--- Вставьте сюда ваш токен от BotFather
+# Вставьте ваш токен от BotFather
+BOT_TOKEN = "8905419939:AAH4AhrCIvA6s8TOdeY0CU48etE7lUKjTv0"
 
-# Настройки ссылок
 REF_LINK = "https://pocketoption.com/register?utm_source=ref"
 SUPPORT_LINK = "https://t.me/your_support"
 FAQ_LINK = "https://t.me/your_faq"
-
-# Картинки
-IMAGE_WELCOME = "https://via.placeholder.com/600x350.png?text=Purosanc+Trade"
-IMAGE_ACCOUNT = "https://via.placeholder.com/600x350.png?text=Выберите+Тип+Счёта"
 
 class AuthState(StatesGroup):
     waiting_for_email = State()
@@ -29,7 +24,6 @@ class AuthState(StatesGroup):
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# --- Клавиатуры ---
 def get_start_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -76,7 +70,6 @@ async def show_main_menu(target, email: str, uid: str = None, real_bal: float = 
     elif isinstance(target, types.CallbackQuery):
         await target.message.answer(text, parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
 
-# --- Хэндлеры ---
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -88,7 +81,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     user_name = message.from_user.first_name or "трейдер"
     
     caption_text = (
-        f"👋 Привет, {user_name} ⚜️!\n\n"
+        f"👋 **Привет, {user_name} ⚜️!**\n\n"
         f"Я — торговый бот для Pocket Option.\n\n"
         f"🤖 **Что я умею:**\n"
         f"✅ Торгую автоматически на твоём счёте\n"
@@ -99,11 +92,11 @@ async def cmd_start(message: types.Message, state: FSMContext):
         f"Перейдите по ссылке 👉 [Регистрация тут]({REF_LINK})"
     )
 
-    await message.answer_photo(
-        photo=IMAGE_WELCOME,
-        caption=caption_text,
+    await message.answer(
+        text=caption_text,
         parse_mode="Markdown",
-        reply_markup=get_start_keyboard()
+        reply_markup=get_start_keyboard(),
+        disable_web_page_preview=True
     )
 
 @dp.callback_query(F.data == "login_acc")
@@ -137,12 +130,7 @@ async def process_password(message: types.Message, state: FSMContext):
         "💳 Пополни реальный счёт — и демо станет доступно."
     )
 
-    await message.answer_photo(
-        photo=IMAGE_ACCOUNT,
-        caption=info_text,
-        parse_mode="Markdown"
-    )
-
+    await message.answer(info_text, parse_mode="Markdown")
     await asyncio.sleep(2)
     await show_main_menu(message, email=email, uid=generated_uid)
 
@@ -152,7 +140,7 @@ async def process_logout(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer("Вы успешно вышли из аккаунта", show_alert=True)
     await callback.message.answer("Вы вышли из системы. Нажмите /start для входа.")
 
-# --- Сервер для заглушки порта Render ---
+# Веб-сервер для поддержки активности Render
 async def handle_ping(request):
     return web.Response(text="Bot is alive!")
 
@@ -167,7 +155,6 @@ async def start_web_server():
 
 async def main():
     logging.basicConfig(level=logging.INFO)
-    # Запускаем веб-сервер и бота одновременно
     await start_web_server()
     await dp.start_polling(bot)
 
